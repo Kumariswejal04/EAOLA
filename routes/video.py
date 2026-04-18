@@ -1,7 +1,11 @@
 import time
 import numpy as np
 import cv2
-from deepface import DeepFace
+try:
+    from deepface import DeepFace
+    DEEPFACE_AVAILABLE = True
+except ImportError:
+    DEEPFACE_AVAILABLE = False
 from flask import Blueprint, Response, session, stream_with_context
 
 from camera import global_camera
@@ -54,9 +58,14 @@ def generate_feed(user_role, camera_active, username="unknown"):
                         small = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
                         objs  = DeepFace.analyze(small, actions=['emotion'],
                                                  enforce_detection=True, silent=True)
-                        if objs:
-                            raw   = objs[0]['dominant_emotion']
-                            label = EMOTION_MAP.get(raw, "Thinking")
+                        if DEEPFACE_AVAILABLE:
+                            objs = DeepFace.analyze(small, actions=['emotion'],
+                                                    enforce_detection=True, silent=True)
+                            if objs:
+                                raw   = objs[0]['dominant_emotion']
+                                label = EMOTION_MAP.get(raw, "Thinking")
+                        else:
+                            label = "Thinking"
                     except Exception:
                         label = "Distracted"
 
