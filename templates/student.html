@@ -193,6 +193,75 @@
 <script>
 const EMOJI_MAP={'Engaged':'🌟','Thinking':'🧠','Bored':'😴','Distracted':'👀','Confused':'😕','Frustrated':'😤'};
 let handRaised=false;
+// ── Browser Camera + Emotion Detection ───────────────────────────────────
+(async function startEmotionCapture() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: 320, height: 240, facingMode: 'user' } 
+        });
+
+        // Create hidden canvas for frame capture
+        const canvas = document.createElement('canvas');
+        canvas.width = 320;
+        canvas.height = 240;
+
+        // Create video element to hold stream
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        await video.play();
+
+        // Replace the <img src="/video_feed"> with live browser camera
+        const feedImg = document.querySelector('img[src="/video_feed"]');
+        if (feedImg) {
+            feedImg.style.display = 'none';
+            video.style.cssText = feedImg.style.cssText;
+            video.className = feedImg.className;
+            video.style.display = 'block';
+            video.style.width = '100%';
+            video.style.borderRadius = '10px';
+            feedImg.parentNode.insertBefore(video, feedImg);
+        }
+
+        // Send frame to server every 3 seconds for emotion analysis
+        setInterval(async () => {
+            try {
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, 320, 240);
+                const base64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+
+                const res = await fetch('/analyze_frame', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ frame: base64 })
+                });
+                const data = await res.json();
+
+                // Update the emotion display cards
+                const emojiEl  = document.getElementById('myEmoji');
+                const labelEl  = document.getElementById('myEmotionLabel');
+                if (emojiEl)  emojiEl.textContent  = EMOJI_MAP[data.emotion] || '😐';
+                if (labelEl)  labelEl.textContent   = data.emotion || 'Detecting...';
+
+                // Show drift warning if student is distracted or bored
+                const drift = document.getElementById('driftWarning');
+                if (drift) {
+                    drift.style.display = 
+                        (data.emotion === 'Distracted' || data.emotion === 'Bored') 
+                        ? 'block' : 'none';
+                }
+
+            } catch(e) {
+                console.log('Emotion frame error:', e);
+            }
+        }, 3000);
+
+    } catch(err) {
+        console.warn('Camera not available:', err);
+    }
+})();
 
 function sendSignal(){
     fetch('/signal_confusion',{method:'POST'}).then(()=>{

@@ -7,6 +7,9 @@ from models import (active_student_sessions, class_history, confusion_alerts,
                     sentiment_logs, active_peers, camera_states, poll_state,
                     hand_raise_queue, auto_confusion_alert, current_session, teacher_pip)
 from config import TEACHER_SUGGESTIONS
+import base64
+import cv2
+import numpy as np
 
 api_bp = Blueprint('api', __name__)
 
@@ -149,3 +152,36 @@ def get_heatmap():
     session_id = request.args.get('session_id')
     data = get_heatmap_data(session_id)
     return jsonify(data)
+
+@api_bp.route('/analyze_frame', methods=['POST'])
+def analyze_frame():
+    try:
+        from deepface import DeepFace
+        data = request.json
+        img_data = base64.b64decode(data['frame'])
+        np_arr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        small = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+        objs = DeepFace.analyze(small, actions=['emotion'],
+                                enforce_detection=True, silent=True)
+        if objs:
+            raw = objs[0]['dominant_emotion']
+            label = EMOTION_MAP.get(raw, "Thinking")
+        else:
+            label = "Thinking"
+    except Exception:
+        label = "Distracted"
+
+    import time
+    user = session.get('user', 'unknown')
+    if user in active_student_sessions:
+        active_student_sessions[user]['status'] = label
+        active_student_sessions[user]['last_seen'] = time.time()
+        last_logged = active_student_sessions[user].get('last_logged')
+        if label != last_logged:
+            from emotion_logger import log_emotion
+            sid = current_session["id"] if current_session["active"] else None
+            log_emotion(user, label, session_id=sid)
+            active_student_sessions[user]['last_logged'] = label
+
+    return jsonify({"emotion": label})
