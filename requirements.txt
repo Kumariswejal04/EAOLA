@@ -3,6 +3,7 @@ textblob>=0.17.1
 numpy>=1.24.0
 gunicorn>=21.2.0
 opencv-python-headless>=4.8.0
-deepface==0.0.93
-torch
-torchvision
+Pillow>=9.0.0
+requests>=2.28.0
+tqdm>=4.65.0
+deepface==0.0.79
