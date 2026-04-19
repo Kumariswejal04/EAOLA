@@ -1,22 +1,22 @@
 import datetime
+import base64
+import time
 from collections import Counter
 from flask import Blueprint, request, session, jsonify
 from textblob import TextBlob
+import cv2
+import numpy as np
 
 from models import (active_student_sessions, class_history, confusion_alerts,
                     sentiment_logs, active_peers, camera_states, poll_state,
                     hand_raise_queue, auto_confusion_alert, current_session, teacher_pip)
-from config import TEACHER_SUGGESTIONS
-import base64
-import cv2
-import numpy as np
+from config import TEACHER_SUGGESTIONS, EMOTION_MAP
 
 api_bp = Blueprint('api', __name__)
 
 
 @api_bp.route('/get_stats')
 def get_stats():
-    # ── Only count active students (1 entry per student, keyed by username) ──
     valid = {u: s for u, s in active_student_sessions.items()
              if s['status'] != "Camera Off"}
 
@@ -31,7 +31,6 @@ def get_stats():
         active_count   = len(statuses)
         current_counts = Counter(statuses)
         vibe           = current_counts.most_common(1)[0][0]
-        # Build student list with name + current emotion (1 per student)
         students_list  = [{"username": u, "status": s['status']}
                           for u, s in valid.items()]
 
@@ -45,15 +44,15 @@ def get_stats():
         "has_voted": session.get('user') in poll_state['voted_users']
     }
 
-    user       = session.get('user', '')
+    user        = session.get('user', '')
     hand_raised = any(h['username'] == user for h in hand_raise_queue)
 
     return jsonify({
-        "active_students": active_count,
-        "current_vibe":    vibe,
-        "teacher_advice":  advice,
+        "active_students":  active_count,
+        "current_vibe":     vibe,
+        "teacher_advice":   advice,
         "latest_sentiment": latest_sentiment,
-        "poll":            poll_data,
+        "poll":             poll_data,
         "history": {
             "Engaged":    current_counts.get("Engaged", 0),
             "Thinking":   current_counts.get("Thinking", 0),
@@ -61,14 +60,14 @@ def get_stats():
             "Distracted": current_counts.get("Distracted", 0),
             "Confused":   current_counts.get("Confused", 0) + current_counts.get("Frustrated", 0)
         },
-        "students_list":  students_list,
-        "timeline":       class_history[-20:],
-        "alerts":         len(confusion_alerts),
+        "students_list": students_list,
+        "timeline":      class_history[-20:],
+        "alerts":        len(confusion_alerts),
         "auto_confusion": auto_confusion_alert,
-        "hand_queue":     hand_raise_queue,
-        "hand_raised":    hand_raised,
+        "hand_queue":    hand_raise_queue,
+        "hand_raised":   hand_raised,
         "session_active": current_session["active"],
-        "teacher_pip":    teacher_pip["active"]
+        "teacher_pip":   teacher_pip["active"]
     })
 
 
@@ -153,6 +152,7 @@ def get_heatmap():
     data = get_heatmap_data(session_id)
     return jsonify(data)
 
+
 @api_bp.route('/analyze_frame', methods=['POST'])
 def analyze_frame():
     try:
@@ -162,20 +162,24 @@ def analyze_frame():
         np_arr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         small = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-        objs = DeepFace.analyze(small, actions=['emotion'],
-                                enforce_detection=True, silent=True)
+        objs = DeepFace.analyze(
+            small,
+            actions=['emotion'],
+            enforce_detection=False,
+            detector_backend='opencv',
+            silent=True
+        )
         if objs:
-            raw = objs[0]['dominant_emotion']
+            raw   = objs[0]['dominant_emotion']
             label = EMOTION_MAP.get(raw, "Thinking")
         else:
             label = "Thinking"
     except Exception:
         label = "Distracted"
 
-    import time
     user = session.get('user', 'unknown')
     if user in active_student_sessions:
-        active_student_sessions[user]['status'] = label
+        active_student_sessions[user]['status']   = label
         active_student_sessions[user]['last_seen'] = time.time()
         last_logged = active_student_sessions[user].get('last_logged')
         if label != last_logged:
